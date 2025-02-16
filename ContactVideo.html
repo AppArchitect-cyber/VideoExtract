@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extract Phone Numbers from Video</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.0.2/tesseract.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background-color: #121212;
+            color: white;
+        }
+
+        .container {
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0px 0px 10px rgba(255, 255, 255, 0.1);
+            max-width: 600px;
+            margin: auto;
+        }
+
+        button {
+            padding: 10px;
+            margin: 10px;
+            cursor: pointer;
+            background: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        #output {
+            margin-top: 20px;
+            font-size: 18px;
+            text-align: left;
+            background: #2c2c2c;
+            padding: 10px;
+            border-radius: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-line;
+        }
+
+        .count {
+            font-weight: bold;
+            color: #d9534f;
+        }
+
+        #timer {
+            font-size: 18px;
+            margin-top: 10px;
+            font-weight: bold;
+            color: #28a745;
+        }
+
+        #progressBar {
+            width: 100%;
+            background-color: #ddd;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        #progressBar div {
+            height: 20px;
+            width: 0%;
+            background-color: #4CAF50;
+            text-align: center;
+            line-height: 20px;
+            color: white;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Extract Phone Numbers from Video</h2>
+        <input type="file" id="videoInput" accept="video/*">
+        <button onclick="startProcessing()">Start Extraction</button>
+        <button onclick="downloadVCF()">Download VCF</button>
+        <div id="timer">Estimated Time: 0s</div>
+        <div id="progressBar"><div></div></div>
+        <div id="output"><span class="count">Extracted Numbers: 0</span></div>
+    </div>
+
+    <script>
+        let extractedContacts = new Set();
+        let video = document.createElement("video");
+        let canvas = document.createElement("canvas");
+        let ctx = canvas.getContext("2d");
+        let frameStep = 0.5;
+        let currentFrameTime = 0;
+        let estimatedTime = 0;
+
+        function startProcessing() {
+            extractedContacts.clear();
+            let file = document.getElementById("videoInput").files[0];
+            if (!file) {
+                alert("Please select a video first.");
+                return;
+            }
+
+            video.src = URL.createObjectURL(file);
+            video.load();
+            video.onloadeddata = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                estimatedTime = Math.ceil(video.duration / frameStep);
+                updateTimer();
+                updateProgress(0);
+                video.currentTime = 0;
+                processFrameByFrame();
+            };
+        }
+
+        function processFrameByFrame() {
+            if (video.currentTime >= video.duration) {
+                document.getElementById("timer").innerText = "Processing Complete";
+                updateProgress(100);
+                return;
+            }
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            preprocessImage(ctx, canvas);
+
+            setTimeout(() => {
+                let imageData = canvas.toDataURL("image/png");
+                extractText(imageData);
+            }, 500);
+
+            setTimeout(() => {
+                currentFrameTime += frameStep;
+                estimatedTime -= 1;
+                updateTimer();
+                updateProgress((currentFrameTime / video.duration) * 100);
+                if (currentFrameTime < video.duration) {
+                    video.currentTime = currentFrameTime;
+                    processFrameByFrame();
+                }
+            }, 1000);
+        }
+
+        function preprocessImage(ctx, canvas) {
+            let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            let pixels = imgData.data;
+            let threshold = 100;
+
+            for (let i = 0; i < pixels.length; i += 4) {
+                let avg = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+                let bw = avg < threshold ? 0 : 255;
+                pixels[i] = pixels[i + 1] = pixels[i + 2] = bw;
+            }
+
+            ctx.putImageData(imgData, 0, 0);
+        }
+
+        function extractText(imageData) {
+            Tesseract.recognize(imageData, "eng+osd", { logger: info => console.log(info) })
+                .then(({ data: { text } }) => {
+                    let phoneNumbers = extractPhoneNumbers(text);
+                    phoneNumbers.forEach(number => extractedContacts.add(number));
+                    updateOutput();
+                })
+                .catch(error => console.error("OCR Error:", error));
+        }
+
+        function extractPhoneNumbers(text) {
+            let regex = /\+91[-.\s]?[6789]\d{4}[-.\s]?\d{5}/g;
+            return (text.match(regex) || []).map(number => number.replace(/\D/g, ""));
+        }
+
+        function updateOutput() {
+            let outputDiv = document.getElementById("output");
+            outputDiv.innerHTML = `<span class="count">Extracted Numbers: ${extractedContacts.size}</span>\n${Array.from(extractedContacts).join("\n")}`;
+        }
+
+        function updateTimer() {
+            document.getElementById("timer").innerText = `Estimated Time: ${estimatedTime}s`;
+        }
+
+        function updateProgress(percent) {
+            document.getElementById("progressBar").firstElementChild.style.width = percent + "%";
+        }
+
+        // Helper function to generate name using first 4 alphabets and last 6 digits of phone number
+        function generateName(number) {
+            const godNames = [
+                "Aaditye", "Aghora", "Ananta", "Arjuna", "Balaji", "Brahma", "Chandra", "Durga", "Ganesha", "Hanuman",
+                "Indra", "Jagannath", "Jai", "Kartikeya", "Krishna", "Laxmi", "Mahadev", "Mahalakshmi", "Manasa", "Murugan",
+                "Narayan", "Parvati", "Rama", "Saraswati", "Shakti", "Shiva", "Shivaji", "Surya", "Vishnu", "Vishvakarman",
+                "Aadi", "Bhairav", "Bhanu", "Chaitanya", "Dattatreya", "Ganapati", "Gauri", "Harivansh", "Hari", "Jagannath",
+                "Kailash", "Kartik", "Mahesh", "Manoj", "Maya", "Narsimha", "Omkar", "Parth", "Raghav", "Ramachandra",
+                "Sankar", "Satyadev", "Shankaracharya", "Shivendra", "Shubham", "Skanda", "Vamana", "Varun", "Vasudev", "Vishwakarma",
+                "Yadav", "Yogesh", "Vaidyanath", "Brahmeshwar", "Chandran", "Brahmaputra", "Keshav", "Nikhil", "Kripalu", "Vishnupriya",
+                "Yogendra", "Suryanarayan", "Niranjan", "Umapati", "Krishnaiah", "Raghunandan", "Bhanupratap", "Parmeshwar", "Ramdev",
+                "Vasudevan", "Brahmanand", "Mantrik", "Vishwajit", "Harinarayan", "Gajendra", "Achyut", "Panchali", "Mahavir", "Kartikay",
+                "Suryadev", "Mahakali", "Kartikeya", "Gaurishankar", "Shivendra", "Raghunath", "Rama", "Uttam", "Vikram", "Suraj",
+                "Aditya", "Anirudh", "Bhaskar", "Chaitanya", "Daksh", "Eshwar", "Gopal", "Harsha", "Ishan", "Janardhan",
+                "Keshav", "Lalit", "Madhav", "Niranjan", "Omkar", "Pranav", "Raghav", "Samarth", "Tanmay", "Umesh",
+                "Varun", "Yash", "Abhinav", "Amit", "Arnav", "Bhavesh", "Chirag",
+                "Abhijit", "Ankush", "Basudeb", "Chandan", "Debasish", "Dibakar", "Dinesh", "Gourav", "Jagannath", "Jiban",
+                "Kalyan", "Laxman", "Manoj", "Milan", "Madhusree", "Nirakar", "Pritam", "Ranjan", "Sanjay", "Sujit",
+                "Sankar", "Subash", "Tapan", "Umesh", "Vikash", "Yogendra"
+            ];
+
+            let randomName = godNames[Math.floor(Math.random() * godNames.length)];
+            return randomName.slice(0, 4) + number.slice(-6); // Combine name and last 6 digits of phone number
+        }
+
+        function downloadVCF() {
+            const contacts = Array.from(extractedContacts).map(number => {
+                let formattedName = generateName(number);
+                if (formattedName) {
+                    // Ensure the number starts with "+" and has only 10 digits after the country code
+                    let formattedNumber = "+91" + number.slice(-10);
+                    return `BEGIN:VCARD\nVERSION:3.0\nFN:${formattedName}\nTEL:${formattedNumber}\nEND:VCARD\n`;
+                }
+            }).filter(contact => contact != null); // Filter out any null contacts
+
+            let vcfContent = contacts.join("\n");
+            let blob = new Blob([vcfContent], { type: "text/vcard" });
+            saveAs(blob, "contacts.vcf");
+        }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+</body>
+</html>
